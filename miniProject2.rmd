@@ -1,0 +1,494 @@
+---
+title: 'A Rose is a Rose is a Rose: The Effects of Selectivity on College Characteristics'
+author: "Charlie Levitt & Kyle Vu"
+date: "3/25/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = FALSE)
+```
+
+After using a data visualization assignment as an opportunity to assuage his mother’s concerns about his post-Swarthmore earnings potential, one of our authors decided to use this data wrangling project as a means of settling another family debate. Kyle was a rising high school senior during the summer of 2014 and was busy complaining about his college search. Fed up with Kyle’s grumbling, his uncle offered up his two critical parcels of wisdom: “don’t get married in college, and stop fretting because every school is the same.” Though Kyle and his uncle ended up agreeing on the first point, the second one still proves to be a point of contention to this day. Accompanied by his data wrangling skills and his colleague Charlie, Kyle seeks to explore differences between colleges and win his second consecutive family debate.
+
+```{r}
+# load necessary libraries
+library(dplyr, warn.conflicts = FALSE)
+library(tidyr)
+library(ggplot2)
+library(ggthemes)
+library(rscorecard)
+library(RColorBrewer)
+library(colorRamps)
+```
+
+```{r, echo = FALSE}
+API_key <- # first key
+charlie_key <- # second key
+final_key <- # final key
+final_key2 <- # final key, part 2
+```
+
+```{r}
+sc_key(API_key) # store personal API key
+sc_key(charlie_key) # store Charlie's API key in case Kyle goes overboard with data pulls
+sc_key(final_key) # Kyle went overboard with data pulls again
+sc_key(final_key2) # see above
+```
+
+After acquiring an API key from the Department of Education, we used the rscorecard package to grab [DOE College Scorecard](https://collegescorecard.ed.gov/) data about schools we held near and dear to our hearts: Ivy League schools, liberal arts colleges, and public colleges in our home states of Minnesota and Pennsylvania. Note that multiple API keys were stored throughout the course of this project. Each API key entitles its user to a finite number of pulls from the data set per day. Because a large number of pulls was executed throughout our analysis, we would often receive an error that essentially stated that we had hit our daily quota of pulls. We circumvented this inconvenience by acquiring additional API keys. Alternatively, we could have executed our first round of pulls using our initial API key then stored this data within a local csv file.
+
+```{r}
+# use rscorecard package to grab data for PA public schools for the year 2015
+PA_data <- sc_init() %>%
+  sc_filter(control == 1, stabbr == "PA") %>%
+  sc_select(instnm, adm_rate, satmtmid, satvrmid, stabbr, costt4_a, married, FAMINC, grad_debt_mdn,
+            MARRIED) %>%
+  sc_year(2015) %>%
+  sc_get()
+```
+
+Grabbing data for the public schools was relatively convenient, courtesy of `rscorecard`’s `sc_filter()`. This verb is analogous to `dpylr`’s `filter()` and allowed us to filter the DOE dataset using a code signifying a school’s public/private status and each state’s abbreviation. After specifying which schools we were interested in, we inserted our variables of interest into the `sc_select()` function. For our analysis, we grabbed data from the year 2015 (when Charlie and Kyle would have been graduating from high school) by entering it as an argument of the `sc_year()` function. Our data grab code is punctuated with the `sc_get()` function which, as expected, gets the desired data.
+
+```{r, echo = FALSE}
+# grab data for MN public schools
+MN_data <- sc_init() %>%
+  sc_filter(control == 1, stabbr == "MN") %>%
+  sc_select(instnm, adm_rate, satmtmid, satvrmid, stabbr, costt4_a, married, FAMINC, grad_debt_mdn,
+            MARRIED) %>%
+  sc_year(2015) %>%
+  sc_get()
+```
+
+
+```{r}
+#store names of top liberal arts colleges (per 2018 US News and World Report list) in char. vector
+LAC_names <- c("Swarthmore College", "Williams College", "Amherst College", "Wellesley College", "Bowdoin College", "Middlebury College", "Pomona College", "Claremont McKenna College")
+
+# use for loop to grab data for top LAC
+LAC_frame <- data.frame() # initialize an empty data frame
+
+for (school in LAC_names){
+  LAC_dat <- sc_init() %>%
+             sc_filter(control == 2, instnm == school) %>%
+             sc_select(instnm, adm_rate, satmtmid, satvrmid, stabbr, costt4_a, married, FAMINC, 
+                       grad_debt_mdn, MARRIED) %>%
+             sc_year(2015) %>%
+             sc_get()
+  LAC_frame <- bind_rows(LAC_frame, LAC_dat)} 
+
+# use dplyr filter to remove impertinent observations that snuck past sc_filter()
+LAC_frame <- LAC_frame %>%
+  filter(instnm %in% LAC_names)
+```
+
+After grabbing the data for public schools, we grabbed data for Ivy League schools and eight elite liberal arts colleges. We used the top eight liberal arts colleges (according to the most recent [U.S. News & World Report list](https://www.usnews.com/best-colleges/rankings/national-liberal-arts-colleges)) in our analysis for the sake of matching the number of Ivy League schools. Complications arose when trying to grab this data- `sc_filter()` did not work when asked to filter the dataset for observations whose institution name was contained in a character vector. To work around this, we stored the names of LAC and Ivy schools as elements in two unique character vectors and used for-loops to iteratively grab the data of each desired school. The use of for-loops was far more expedient than repeatedly copying/pasting blocks of code to grab the data.
+
+After the data for elite schools was grabbed, we noticed a flaw in rscorecard’s sc_filter. Scanning through the names of our observations, we discovered that some schools (like University of Massaschusetts- Amherst or Princeton Theological Seminary) with names similar to those of our elite schools had snuck past the `sc_filter()`. We remedied this by using `dplyr`’s `filter()` function to remove these unwanted observations.
+
+```{r, echo = FALSE}
+# store names of Ivy League schools
+ivy_names <- c("Harvard University", "Princeton University", "Yale University", "Dartmouth College",
+               "Brown University", "Cornell University", "University of Pennsylvania", "Columbia University in the City of New York")
+
+# grab data for Ivy League colleges
+ivy_frame <- data.frame()
+
+for (ivy in ivy_names){
+  ivy_dat <- sc_init() %>%
+             sc_filter(control == 2, instnm == ivy) %>%
+             sc_select(instnm, adm_rate, satmtmid, satvrmid, stabbr, costt4_a, married, FAMINC,
+                       grad_debt_mdn, MARRIED) %>%
+             sc_year(2015) %>%
+             sc_get()
+  ivy_frame <- bind_rows(ivy_frame, ivy_dat)} 
+
+# filter out schools we don't want in our dataset
+ivy_frame <- ivy_frame %>%
+  filter(instnm %in% ivy_names)
+```
+
+
+```{r}
+# aggregate all frames
+all_data <- bind_rows(ivy_frame, LAC_frame, MN_data, PA_data)
+
+# add school median two-part SAT score as variable in our dataset
+all_data <- all_data %>%
+  mutate(mid_sat_score = satmtmid + satvrmid,
+         over_50k = ifelse(costt4_a > 50000, "Over $50,000", "Under $50,000"),
+         over_50k = ifelse(is.na(over_50k), "Did not report", over_50k))
+```
+
+Once we created four data frames for the LAC, Ivy, MN, and PA schools, we used `bind_rows()` to join these component data frames into one data frame containing all 171 of our relevant observations. We added the median two-part SAT score (which has a maximum value of 1,600) for each observation using `dpylr()`'s `mutate()` function. We also added an indicator variable to specify whether a given school had an average annual cost of more/less than $50,000.
+
+We then used `dplyr`'s `summarize()` function to find the average value of several variables within our four groups of colleges. Because not every school reported values for every variable in our dataset, we ignored missing values while calculating these averages by entering "na.rm = TRUE" as an argument in our `mean()` functions.
+
+```{r}
+# build summary table with averaged desired variables for comparison
+ivy_summary <- ivy_frame %>%
+  summarize(category = "Ivy",
+            avg_SAT_mid = mean(satmtmid + satvrmid, na.rm = TRUE),
+            avg_admit = mean(adm_rate, na.rm = TRUE),
+            avg_grad_debt = mean(grad_debt_mdn, na.rm = TRUE),
+            avg_fam_inc = mean(faminc, na.rm = TRUE),
+            avg_cost = mean(costt4_a, na.rm = TRUE),
+            avg_married = mean(married, na.rm = TRUE))
+```
+
+```{r, echo = FALSE}
+LAC_summary <- LAC_frame %>%
+  summarize(category = "LAC",
+            avg_SAT_mid = mean(satmtmid + satvrmid, na.rm = TRUE),
+            avg_admit = mean(adm_rate, na.rm = TRUE),
+            avg_grad_debt = mean(grad_debt_mdn, na.rm = TRUE),
+            avg_fam_inc = mean(faminc, na.rm = TRUE),
+            avg_cost = mean(costt4_a, na.rm = TRUE),
+            avg_married = mean(married, na.rm = TRUE))
+
+PA_summary <- PA_data %>%
+  summarize(category = "PA public",
+            avg_SAT_mid = mean(satmtmid + satvrmid, na.rm = TRUE),
+            avg_admit = mean(adm_rate, na.rm = TRUE),
+            avg_grad_debt = mean(grad_debt_mdn, na.rm = TRUE),
+            avg_fam_inc = mean(faminc, na.rm = TRUE),
+            avg_cost = mean(costt4_a, na.rm = TRUE),
+            avg_married = mean(married, na.rm = TRUE))
+
+MN_summary <- MN_data %>%
+  summarize(category = "MN public",
+            avg_SAT_mid = mean(satmtmid + satvrmid, na.rm = TRUE),
+            avg_admit = mean(adm_rate, na.rm = TRUE),
+            avg_grad_debt = mean(grad_debt_mdn, na.rm = TRUE),
+            avg_fam_inc = mean(faminc, na.rm = TRUE),
+            avg_cost = mean(costt4_a, na.rm = TRUE),
+            avg_married = mean(married, na.rm = TRUE))
+```
+
+```{r}
+# form summary table for comparison among groups
+all_summary <- bind_rows(LAC_summary, ivy_summary, MN_summary, PA_summary)
+all_summary
+```
+
+We used `bind_rows()` to congregate all of our group summary tables into one uniform summary table that allows for convenient comparison between groups.
+
+```{r, echo = FALSE}
+# note that 108 obs were removed
+ggplot(data = all_data,
+       mapping = aes(y = mid_sat_score,
+                     x = adm_rate,
+                     col = faminc,
+                     shape = over_50k)) +
+  scale_color_distiller(palette = "OrRd", direction = 1) +
+  geom_smooth(aes(group = 1), se = FALSE, col = "dodgerblue4") +
+  geom_point() +
+  theme_economist() +
+  theme(legend.position = "right") +
+  labs(title = "Effects of Selectivity on School Characteristics",
+       subtitle = "Data: Department of Education College Scorecard (2015)",
+       y = "Median SAT Score (Verbal + Math)",
+       x = "Admission Rate",
+       col = "Average Family\n Income ($)",
+       shape = "Annual Cost of Attendance")
+```
+	
+Kyle wanted to show that his fretting was justified, but exactly what makes any given school different from another? One variable that everyone knows and talks about during admissions season is a school’s admissions rate-  the number of students accepted divided by the number that apply. Schools that have lower admissions rates usually require a higher standard for admission: higher SAT scores, more extracurriculars, a higher degree of involvement in the student body, etc.
+	
+For Kyle to prove his uncle wrong, he had to provide evidence of clear differences between the colleges that have low or high acceptance rates. We found that when a school's admission rate decreased below 25%, Kyle’s odds of receiving an expensive education with smarter, wealthier students tended to increase.
+
+As expected, a school’s median SAT score generally increased as its admissions rates decreased. Ivy League schools had acceptance rates around 10% or lower, while liberal arts colleges typically had rates closer to 15%. The public schools within Minnesota and Pennsylvania tended to have higher admissions rates between 70-80% on average. The average median SAT score for liberal arts colleges and Ivy League schools was in the low-to-high 1,400s; this figure was ranged from the high-900s to the high-1,000s for the public schools. The variability in median SAT score appeared to be greater among schools with higher admissions rates. 
+
+An SAT score ostensibly measures aptitude alone. However, preparation matters, and not every student has the opportunity to prepare equally. Generally, students with higher incomes can afford to prepare more effectively for the exam by using additional means of help, like one-on-one tutoring or SAT prep classes, which can lead to better scores. This would lead us to conjecture that schools with lower admissions rates should also have students with a higher average family income. This brings us to our next point of interest: admissions rate and average family income.
+
+We chose to analyze average family income rather than the median family income because the former would better reflect the right-skewed distribution of income in the United States. This variable is indicated by the level of saturation in our graphic- the darker the point, the greater the average family income of the school’s students. The elite schools with admissions rates below 25% almost exclusively had an average family income above $60,000 (the lowest figure among this cohort was Harvard's $58,620). Alternatively, for the schools above the 25% admissions cutoff, around a quarter had an average family income below $60,000. The average family income for liberal arts schools was $87,218; $79,882 for Ivy League schools; for the public schools, the average cost centered closer to $50,000. 
+
+Looking at the graph, the schools with higher admissions rates tend to have a lighter shade, corresponding to a lower average family income. For schools with very low admissions rates, all of the points are of a darker shade, implying that wealthier students are attending these schools.  Our analysis so far suggests that this is possibly because they can afford better SAT tutoring/prep and are more likely to be accepted. It could also be due to the higher average cost of these selective schools, which sits at over $60,000 per year (about three times the average annual cost for MN and PA public schools).
+	
+Once again, there is a clear split right around the 25% admissions rate marker. Almost every single school in our sample that has an admissions rate below 25% costs at least a whopping $60,000 (except Princeton, which misses the mark by a few hundred dollars). On the other hand, every school with an admissions rate above 25% costs below $50,000 and usually falls between $20,000 and $30,000 per year. Thus, poorer students, who might otherwise qualify for acceptance at more selective schools, might be impeded from attending these elite institutions because they are unable to afford them. The average annual cost for liberal arts schools was $62,652; $63,514 for Ivy League schools; and between $17,000 and $21,000 for public schools. This cost disparity between elite and public schools could potentially be explained by different levels of operational and administrative spending at these schools. Perhaps elite schools, in an effort to attract high-caliber prospective students, shell out more money towards higher salaries for star faculty members and amenities for students, then offset these additional expenditures by charging students more. Future analyses of differential patterns in spending at these schools would help elucidate any underlying explanations for this cost disparity.
+
+Overall, we can observe that schools with lower admission rates tend to have a different type of student than schools with higher admissions rates. Very selective schools are more likely to cost more, have a wealthier student body, and require higher standardized test scores for admission. Unfortunately, our data set cannot provide information about the quality of education provided at each school or about expected post-graduation earnings for each school's students. Further analyses would study how much of an advantage, financial or otherwise, manifests from going to a selective school over a less selective public school.
+
+In terms of concrete figures to refute the argument put forth by Kyle’s uncle, we can calculate (using the average annual costs at liberal arts schools multiplied by four years subtracted by the average annual cost of PA public schools multiplied by four years) that the plan to pay the full cost of attendance for all four years at a public college in Pennsylvania (rather than a typical liberal arts school) would likely to save Kyle a substantial sum of around $170,000. As we will see later, the assumption of constant annual costs we used for this calculation is a tenuous one but still provides useful context about the magnitude of potential savings.
+
+After looking at the influence of school selectivity on several variables, we (as statistics students wanting to moonlight as economics students) intended to study how the recession impacted the earnings of students who graduated into a loose labor market (one that is suboptimal for those seeking work) in the midst of the [Great Recession, the most significant macroeconomic event in recent history](https://www.federalreservehistory.org/essays/great_recession_of_200709). However, we encountered a lack of cooperative data in the College Scorecard data set. There was no variable with a high rate of reported values that had median income for graduates x number of years after graduation. To circumvent this, we focused instead on the amount of debt that an average student graduated with at each school and the average annual cost of attendance for each school.
+
+```{r, echo = FALSE}
+# grab debt data for public schools in MN for years 1997-2015
+MN_recession <- sc_init() %>%
+                sc_filter(control == 1, stabbr == "MN") %>%
+                sc_select(instnm, grad_debt_mdn) %>%
+                sc_year(1997) %>%
+                sc_get()
+
+# use for loop to iteratively grab debt data for each desired year
+for(year in 1998:2015){
+  MN_new <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "MN") %>%
+           sc_select(instnm, grad_debt_mdn) %>%
+           sc_year(year) %>%
+           sc_get()
+  MN_recession <- bind_rows(MN_recession, MN_new)}
+
+# add variable indicating category of school
+MN_recession <- MN_recession %>%
+  mutate(category = "Public",
+         school_name = "MN public")
+```
+
+
+```{r, echo = FALSE}
+# grab PA debt data
+PA_recession <- sc_init() %>%
+                sc_filter(control == 1, stabbr == "PA") %>%
+                sc_select(instnm, grad_debt_mdn) %>%
+                sc_year(1997) %>%
+                sc_get()
+
+for(year in 1998:2015){
+  PA_new <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "PA") %>%
+           sc_select(instnm, grad_debt_mdn) %>%
+           sc_year(year) %>%
+           sc_get()
+  PA_recession <- bind_rows(PA_recession, PA_new)}
+
+PA_recession <- PA_recession %>%
+  mutate(category = "Public",
+         school_name = "PA public")
+```
+
+```{r}
+# grab debt data across years 1997-2015 for LACs
+LAC_recession <- data.frame() # initialize empty data frame
+for (name in LAC_names){
+  school_dat <- sc_init() %>%
+                sc_filter(instnm == name) %>%
+                sc_select(grad_debt_mdn, instnm) %>%
+                sc_year(1997) %>%
+                sc_get()
+  LAC_recession <- bind_rows(LAC_recession, school_dat)}  
+
+# use nested for loop to grab debt data for each year for each school
+for (name in LAC_names){
+  for(year in 1998:2015){
+    thing <- sc_init() %>%
+             sc_filter(instnm == name) %>%
+             sc_select(grad_debt_mdn, instnm) %>%
+             sc_year(year) %>%
+             sc_get()
+    LAC_recession <- bind_rows(LAC_recession, thing)}}
+
+# filter out unwanted schools; add school category variable to data frame
+LAC_recession <- LAC_recession %>%
+  filter(instnm %in% LAC_names) %>%
+  mutate(category = "Private Elite",
+         school_name = instnm)
+```
+
+```{r, echo = FALSE}
+# grab debt data for Ivies
+ivy_recession <- data.frame() # initialize empty data frame
+for (name in ivy_names){
+  school_dat <- sc_init() %>%
+                sc_filter(instnm == name) %>%
+                sc_select(grad_debt_mdn, instnm) %>%
+                sc_year(1997) %>%
+                sc_get()
+  ivy_recession <- bind_rows(ivy_recession, school_dat)}  
+
+for (name in ivy_names){
+  for(year in 1998:2015){
+    thing <- sc_init() %>%
+             sc_filter(instnm == name) %>%
+             sc_select(grad_debt_mdn, instnm) %>%
+             sc_year(year) %>%
+             sc_get()
+    ivy_recession <- bind_rows(ivy_recession, thing)}}
+
+ivy_recession <- ivy_recession %>%
+  filter(instnm %in% ivy_names) %>%
+  mutate(category = "Private Elite",
+         school_name = instnm)
+```
+
+Once again, we used for-loops to iteratively grab the median graduate debt for each of the schools we were interested in. Because we sought to explore the effects of the Great Recession, we had to grab data across years this time. To accomplish this, we used a nested for-loop to grab data for each school for each desired year. This debt data was compiled for each category of school before we used `bind_rows()` to build one data frame containing all of our observations. We decided to grab graduate debt data from the years 1997 through 2015 to provide a buffer before and after the Great Recession, which spanned from late-2007 to mid-2009. 
+
+```{r}
+# bind debt data for all schools
+all_recession <- bind_rows(MN_recession, PA_recession, ivy_recession, LAC_recession)
+```
+
+An analogous process was used to build a data frame containing the data of average annual costs for schools from the years 2009-2015. Note that data for this variable was not available before the year 2009, which marked the conclusion of the Great Recession. However, the trend of increasing average annual cost of attendance illustrated with the 2009-15 data still serves as a likely explanation for the trends in increasing graduate debt and could potentially be extrapolated to the years immediately preceding 2009. The use of another data set to find pre-2009 annual costs would provide further interesting context.
+
+```{r, echo = FALSE}
+colourCount <- 18
+getPalette <- colorRampPalette(brewer.pal(18, "Dark2"))
+
+ggplot(data = all_recession,
+       mapping = aes(x = year, 
+                     y = grad_debt_mdn)) +
+  geom_rect(fill = "rosybrown1",
+            alpha = 0.025, 
+            aes(xmin = 2007, 
+            xmax = 2009,
+            ymin = Inf,
+            ymax = -Inf)) +
+  geom_point(col = "navy", alpha = 0.2, position = "jitter") +
+  facet_grid(category ~ .) +
+  stat_smooth(aes(col = school_name), alpha = 0.5, geom = 'line', se = FALSE) +
+  geom_smooth(aes(group = 1), col = "firebrick3", se = FALSE) +
+  theme_economist() +
+  guides(col = guide_legend(ncol = 4)) +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 6)) +
+  scale_color_manual(values = getPalette(colourCount)) +
+  labs(col = "School\n Name/Type",
+       title = "Median Student Debt for Colleges over Time (1997-2015)",
+       caption = "Data: Department of Education College Scorecard",
+       x = "Year",
+       y = "Graduates' Median Debt ($)",
+       subtitle = "Note: The pink interval indicates the duration of the Great Recession.\n      The opaque red lines represent median debt among elite schools and public schools.")
+```
+
+Our graphic indicated that students who graduated during the recession faced increasing levels of debt. This trend of increasing debt continued in the years following the recession. Different types of schools were hit differently by the recession, however. The average graduate's median debt at elite schools in our data set was declining before the Great Recession hit. The recession was an inflection point that changed this trend, but, by the year 2015, the average median debt at these elite schools was not much higher than its previous local maximum in the year 1997 (note that the DOE data dictionary does not state whether reported values for debt have been adjusted for inflation). For public schools in Pennsylvania and Minnesota, however, the average median debt increased from about $10,000 in 1997 to a little under $20,000 in 2015, nearly a two-fold increase! 
+
+This differential effect of the recession on debt could potentially be explained by the [withdrawal of federal and state funds](https://www.cbpp.org/research/state-budget-and-tax/funding-down-tuition-up) from public schools. As seen prior, the average student at a public school tends to be poorer than their counterpart at an elite school. Faced with a lesser amount of student aid typically enabled by government money, these public school students have little choice but to graduate with more debt than desired.
+
+```{r, echo = FALSE}
+# grab cost data across years for LACs (cost data only available since 2009)
+LAC_cost <- data.frame() # initialize empty data frame
+for (name in LAC_names){
+  school_dat <- sc_init() %>%
+                sc_filter(instnm == name) %>%
+                sc_select(costt4_a, instnm) %>%
+                sc_year(2009) %>%
+                sc_get()
+  LAC_cost <- bind_rows(LAC_cost, school_dat)}  
+
+for (name in LAC_names){
+  for(year in 2010:2015){
+    thing <- sc_init() %>%
+             sc_filter(instnm == name) %>%
+             sc_select(costt4_a, instnm) %>%
+             sc_year(year) %>%
+             sc_get()
+    LAC_cost <- bind_rows(LAC_cost, thing)}}
+
+LAC_cost <- LAC_cost %>%
+  filter(instnm %in% LAC_names) %>%
+  mutate(category = "Private Elite",
+         school_name = instnm)
+```
+
+```{r, echo = FALSE}
+# grab cost data for Ivies
+ivy_cost <- data.frame() # initialize empty data frame
+for (name in ivy_names){
+  school_dat <- sc_init() %>%
+                sc_filter(instnm == name) %>%
+                sc_select(costt4_a, instnm) %>%
+                sc_year(2009) %>%
+                sc_get()
+  ivy_cost <- bind_rows(ivy_cost, school_dat)}  
+
+for (name in ivy_names){
+  for(year in 2010:2015){
+    thing <- sc_init() %>%
+             sc_filter(instnm == name) %>%
+             sc_select(costt4_a, instnm) %>%
+             sc_year(year) %>%
+             sc_get()
+    ivy_cost <- bind_rows(ivy_cost, thing)}}
+
+ivy_cost <- ivy_cost %>%
+  filter(instnm %in% ivy_names) %>%
+  mutate(category = "Private Elite",
+         school_name = instnm)
+```
+
+
+```{r, echo = FALSE}
+# grab debt data for public schools in MN
+MN_cost <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "MN") %>%
+           sc_select(costt4_a, instnm) %>%
+           sc_year(2009) %>%
+           sc_get()
+
+for(year in 2010:2015){
+  thing <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "MN") %>%
+           sc_select(costt4_a, instnm) %>%
+           sc_year(year) %>%
+           sc_get()
+  MN_cost <- bind_rows(MN_cost, thing)}
+
+MN_cost <- MN_cost %>%
+  mutate(category = "Public",
+         school_name = "MN public")
+
+# do the same for PA public schools
+PA_cost <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "PA") %>%
+           sc_select(costt4_a, instnm) %>%
+           sc_year(2009) %>%
+           sc_get()
+
+for(year in 2010:2015){
+  thing <- sc_init() %>%
+           sc_filter(control == 1, stabbr == "PA") %>%
+           sc_select(costt4_a, instnm) %>%
+           sc_year(year) %>%
+           sc_get()
+  PA_cost <- bind_rows(PA_cost, thing)}
+
+PA_cost <- PA_cost %>%
+  mutate(category = "Public",
+         school_name = "PA public")
+```
+
+```{r}
+# create data frame of schools cost trends
+public_cost <- bind_rows(MN_cost, PA_cost)
+elite_cost <- bind_rows(ivy_cost, LAC_cost)
+```
+
+For the sake of plotting, we opted to create two separate data frames of annual cost data, rather than the one data frame approach we utilized for the graduate debt data.
+
+```{r, echo = FALSE}
+colourCount <- 18
+getPalette <- colorRampPalette(brewer.pal(18, "Dark2"))
+
+ggplot(data = public_cost,
+       mapping = aes(x = year, 
+                     y = costt4_a)) +
+  geom_point(col = "navy", alpha = 0.2, position = "jitter") +
+  geom_point(data = elite_cost, col = "navy", alpha = 0.2, position = "jitter") +
+  stat_smooth(aes(col = school_name), geom = 'line', se = FALSE) +
+  stat_smooth(data = elite_cost, aes(col = school_name), alpha = 0.5, geom = 'line', se = FALSE) +
+  geom_smooth(data = elite_cost, aes(group = 1), col = "firebrick3", se = FALSE) +
+  geom_smooth(data = public_cost, aes(group = 1), col = "firebrick3", se = FALSE, method = "loess") +
+  theme_economist() +
+  guides(col = guide_legend(ncol = 2)) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 6)) +
+  scale_color_manual(values = getPalette(colourCount)) +
+  labs(col = "School\n Name/Type",
+       title = "Average Cost of Attendance over Time (2009-2015)",
+       caption = "Data: Department of Education College Scorecard",
+       subtitle = "The opaque red lines represent average cost among elite schools and public schools.",
+       x = "Year",
+       y = "Average Cost of Attendance ($)")
+```
+
+From 2009-2015, the cost of receiving an education from an elite institution has risen noticeably. The average annual cost at elite schools rose from about $50,000 in 2009 to over $60,000 in 2015, marking an increase of over 20% (again, note that the DOE data dictionary does not state whether the listed annual cost values are inflation-adjusted). Among public schools, average costs increased about 10% in this span, from about $18,000 to a little under $20,000. 
+
+Even though costs rose more sharply at elite schools, recall that the average student at an elite school did not graduate with as much debt as their public school counterpart. We offer two possible explanations. The families of those attending elite colleges might be so rich that they are able to foot the increasing cost of schooling without needing to accumulate additional debt. Alternatively, because elite schools tend to have [robust endowments per student](https://www.nytimes.com/interactive/2017/05/25/sunday-review/opinion-pell-table.html), it is also possible that elite schools have better leverage than public schools do to provide more financial aid to students to counteract rising costs. Future analysis could analyze how schools utilize their endowments to provide aid to their students, as some [rich elite schools are notoriously parsimonious in this regard](https://www.theatlantic.com/education/archive/2016/08/rich-stingy-colleges/494696/).
+
+Overall, Kyle's argument that colleges exhibit some stratification seems to have more empirical backing than his uncle's argument that "every school is the same" does. Kyle has yet to receive a substantive explanation as to why his uncle holds this belief, but he hypothesizes that his aunt broke his uncle's heart at some point in college before they married. Kyle was able to appease his uncle in one regard, though. At about 2%, liberal arts colleges had the lowest proportion of married students among the four types of colleges studied. (Kyle is obligated as an ethical data scientist to state that the married variable had high levels of missingness in the data set.)
+
+In our analysis, we observed that as colleges get more selective, they require a higher standard of admission, manifesting as higher standardized test scores in our data. Performance on the SAT is determined not solely by aptitude but also by the ability to employ extracurricular resources to prepare for the test. Wealthier students that are able to prepare more efficaciously by using these resources are more likely to score highly and therefore attend more selective institutions. The wealth of students at elite schools also appeared to help these schools weather the Great Recession; even in light of sharply rising annual costs at these schools, students tended not to graduate during and after the recession with levels of debt that were any higher than pre-recession levels. Those at public schools were not as fortunate. Though costs did not rise as sharply at these schools (which were typically much cheaper than elite schools anyways), those graduating from public schools typically left college with more debt than those graduating from elite schools.
+
